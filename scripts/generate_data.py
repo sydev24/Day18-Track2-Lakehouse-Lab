@@ -76,8 +76,16 @@ def _build_rows(n_rows: int) -> list[Row]:
 def main(n_rows: int = 1_000_000, out: str = "s3a://bronze/llm_calls_raw") -> None:
     spark = get_spark("generate_data")
     rows = _build_rows(n_rows)
-    df = spark.createDataFrame(spark.sparkContext.parallelize(rows, numSlices=16))
-    df.write.format("delta").mode("overwrite").save(out)
+    
+    batch_size = 250_000
+    for i in range(0, n_rows, batch_size):
+        batch_rows = rows[i : i + batch_size]
+        df_batch = spark.createDataFrame(spark.sparkContext.parallelize(batch_rows, numSlices=16))
+        mode = "overwrite" if i == 0 else "append"
+        df_batch.write.format("delta").mode(mode).save(out)
+        print(f"  Processed batch {i // batch_size + 1}...")
+
+    df = spark.read.format("delta").load(out)
     n_unique = df.select("request_id").distinct().count()
     print(
         f"Wrote {n_rows:,} rows to {out}\n"
